@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+
+# This script is designed to help someone bootstrap terraform and requires the
+# user already has AWS credentials and Terraform installed
+
+# NOTE: we use the aws command line tool to verify you have access configured
+
+check_prerequisites() {
+  aws sts get-caller-identity 2>&1 >/dev/null
+  if [[ $? -ne 0 ]]; then
+    echo "You must configure your local 'aws' client before using this tool"
+    exit 1
+  fi
+
+  local __tfver=$(terraform version | sed 's/^.* v//' 2>/dev/null)
+  if [[ $? -eq 0 ]]; then
+    local __tmp=( ${__tfver//./ } )
+    if [[ ${__tmp[0]} -eq 1 ]]; then
+      if [[ ${__tmp[1]} -eq 0 ]] && [[ ${__tmp[2]} -ge 3 ]]; then
+        :
+      elif [[ ${__tmp[1]} -ge 1 ]]; then
+        :
+      else
+        echo "You must install Terraform 1.0.3 or higher"
+        exit 1
+      fi
+    else
+      echo "You must install Terraform 1.0.3 or higher"
+      exit 1
+    fi
+  else
+    echo "You must install Terraform 1.0.3 or higher"
+    exit 1
+  fi
+  return 0
+}
+
+check_prerequisites
+
+set -e
+cd $(cd $(dirname ${BASH_SOURCE[0]})/..; pwd -P)/bootstrap
+terraform init
+terraform validate
+set +e
+terraform plan -detailed-exitcode -input=false
+__ret=$?
+case ${__ret} in
+  2) echo terraform apply -auto-approve ;; # remove echo
+  *) echo terraform plan result ${__ret} && exit ${__ret} ;;
+esac
+__ret=$?
+case ${__ret} in
+  0) echo terraform apply successful ;;
+  *) echo terraform apply result ${__ret} && exit ${__ret} ;;
+esac
+
+if test -e backend.tf; then
+  echo backend is already configured... remove bootstrap/backend.tf to reset
+  exit 0
+fi
+
+__bucket=$(terraform output -raw terraform_state_bucket)
+__region=$(terraform output -raw region)
+if [[ ${__bucket} =~ terraform-state ]]; then
+  echo bucket: ${__bucket}
+else
+  __bucket=TEST_BUCKET
+  __region=us-YOMOMMA
+fi
+sed -e "s/CHANGEME_BUCKET/${__bucket}/" -e "s/CHANGEME_REGION/${__region}/" backend.tf.example > backend.tf
+echo terraform init -migrate-state -force-copy # remove echo

@@ -1,0 +1,3 @@
+cloud_provider: aws
+metadata:
+  region: us-west-2
